@@ -330,6 +330,569 @@ Debugging tools:
 
 Check for jank (frames >16ms), memory leaks, and unnecessary rebuilds. Profile in release mode for accurate measurements.
 
+
+# **Deep Architecture Questions - Comprehensive Answers**
+
+## **24. "How would you implement Flutter from scratch?"**
+
+### **Core Architecture Overview**
+To implement Flutter from scratch, I'd build a reactive UI framework with these core pillars:
+
+**1. Widget Tree → Element Tree Diffing Algorithm**
+```plaintext
+┌────────────────────────────────────────────-─┐
+│           DIFFING ALGORITHM                  │
+├────────────────────────────────────────────-─┤
+│ Input: Old Widget Tree, New Widget Tree      │
+│ Output: Minimal Element Updates              │
+│                                              │
+│ Process:                                     │
+│ 1. Tree Traversal (Depth-first)              │
+│ 2. Type/Key Matching                         │
+│ 3. Property Diffing                          │
+│ 4. Update/Mount/Unmount Decisions            │
+└───────────────────────────────────────────-──┘
+```
+
+The diffing algorithm would work like this:
+- **Element Recycling**: When widget type and key match, reuse existing Element
+- **Update Phase**: Compare widget properties, mark Element as dirty if changed
+- **Mount/Unmount**: For type/key mismatches, unmount old, mount new
+- **Slotted Children**: Handle children arrays with positional matching
+
+**Key Optimization**: O(N) complexity by assuming tree edits are rare and using keys for reordering.
+
+**2. RenderObject Layout Protocol (Parent-in, Child-out)**
+```plaintext
+┌───────────────────────────────────────────-──┐
+│        LAYOUT PROTOCOL                       │
+├───────────────────────────────────────────-──┤
+│ Parent → Child: Constraints                  │
+│     └── minWidth, maxWidth                   │
+│     └── minHeight, maxHeight                 │
+│                                              │
+│ Child → Parent: Size                         │
+│     └── width, height                        │
+│                                              │
+│ Algorithm:                                   │
+│ 1. parent.layout()                           │
+│ 2. parent.size = parent.performLayout()      │
+│ 3. For each child:                           │
+│    - child.layout(parentConstraints)         │
+│    - parent.positionChild(child)             │
+└───────────────────────────────────────────-──┘
+```
+
+**Deep Implementation Details**:
+- **Constraints Propagation**: Parents pass down tight/loose constraints
+- **Child Sizing**: Each child sizes itself within parent constraints
+- **Parent Positioning**: Parent positions children after they're sized
+- **Relayout Boundary**: RenderObjects mark themselves to stop constraint propagation
+
+**3. Layer Tree Compositing and Repaint Boundaries**
+```plaintext
+┌───────────────────────────────────────────-──┐
+│        COMPOSITING SYSTEM                    │
+├────────────────────────────────────────────-─┤
+│ RenderObject → Layer → GPU Command Buffer    │
+│                                              │
+│ Layer Types:                                 │
+│ • TransformLayer: Matrix transformations     │
+│ • OffsetLayer: Simple translations           │
+│ • ClipRectLayer: Rectangular clipping        │
+│ • PictureLayer: Custom painting              │
+│                                              │
+│ Repaint Boundary:                            │
+│ • Isolates repaint to subtree                │
+│ • Creates separate layer                     │
+│ • Prevents parent repaints                   │
+└─────────────────────────────────────────-────┘
+```
+
+**Compositing Strategy**:
+- **Retained Mode**: Layers persist between frames when possible
+- **Partial Updates**: Only dirty layers are recomposited
+- **GPU Upload**: Layer textures uploaded once, reused across frames
+- **Z-ordering**: Layer stacking controls visual hierarchy
+
+**4. Skia Integration for 2D Rendering**
+```plaintext
+┌────────────────────────────────────────────-─┐
+│        SKIA INTEGRATION                      │
+├────────────────────────────────────────────-─┤
+│ Flutter → Skia Canvas → GPU Pipeline         │
+│                                              │
+│ Abstraction Layers:                          │
+│ 1. Canvas API (Dart)                         │
+│ 2. Skia Canvas (C++)                         │
+│ 3. Platform GPU (OpenGL/Metal/Vulkan)        │
+│                                              │
+│ Key Features:                                │
+│ • Path rendering (bezier curves)             │
+│ • Text shaping (Harfbuzz)                    │
+│ • Image decoding (libpng, libjpeg-turbo)     │
+│ • Gradient/pattern fills                     │
+└───────────────────────────────────────────-──┘
+```
+
+**Integration Points**:
+- **Canvas Recording**: Dart commands → SkPicture recording
+- **GPU Backend**: Skia configured for platform's graphics API
+- **Text Stack**: Font loading → Text shaping → Glyph caching
+- **Image Pipeline**: Network/asset → Decode → GPU texture
+
+**5. Platform Channels for Native Interop**
+```plaintext
+┌───────────────────────────────────────────-──┐
+│        PLATFORM CHANNEL ARCHITECTURE         │
+├────────────────────────────────────────────-─┤
+│ Dart ↔ Message Codec ↔ Platform ↔ Native     │
+│                                              │
+│ Codec Types:                                 │
+│ • StandardMessageCodec: Basic types          │
+│ • JSONMessageCodec: JSON strings             │
+│ • BinaryCodec: Raw byte buffers              │
+│ • StringCodec: UTF-8 strings                 │
+│                                              │
+│ Communication Models:                        │
+│ • MethodChannel: RPC-style calls             │
+│ • EventChannel: Stream from native           │
+│ • BasicMessageChannel: Raw messages          │
+└─────────────────────────────────────────-────┘
+```
+
+**Implementation Details**:
+- **Serialization Protocol**: Efficient binary serialization format
+- **Thread Safety**: Main thread ↔ Platform thread communication
+- **Memory Management**: Zero-copy buffers where possible
+- **Error Propagation**: Structured error passing between runtimes
+
+**6. Dart VM Integration for Hot Reload**
+```plaintext
+┌───────────────────────────────────────────-──┐
+│        HOT RELOAD ARCHITECTURE               │
+├────────────────────────────────────────────-─┤
+│ Source Change → Incremental Compile → Update │
+│                                              │
+│ Components:                                  │
+│ 1. Dart VM Service Protocol                  │
+│ 2. Kernel File Generation                    │
+│ 3. State Preservation                        │
+│ 4. Widget Tree Reconnection                  │
+│                                              │
+│ Limitations:                                 │
+│ • Can't change main()                        │
+│ • Can't add/remove statics                   │
+│ • Global variable reinitialization           │
+└───────────────────────────────────────────-──┘
+```
+
+**Hot Reload Process**:
+1. **Source Monitoring**: File system watcher detects changes
+2. **Incremental Compilation**: Dart → Kernel (bytecode) translation
+3. **VM Patching**: Replace existing classes in running VM
+4. **Widget Rebuild**: Mark all widgets dirty, trigger rebuild
+5. **State Preservation**: Maintain widget state via element tree
+
+**Complete System Flow**:
+```plaintext
+┌────────────────────────────────────────────────────────────┐
+│                     FLUTTER ARCHITECTURE                   │
+├────────────────────────────────────────────────────────────┤
+│  Developer Code                                            │
+│       ↓                                                    │
+│  Widget Tree (Immutable)                                   │
+│       ↓                                                    │
+│  Element Tree (Mutable, Lifecycle)                         │
+│       ↓                                                    │
+│  RenderObject Tree (Layout/Paint)                          │
+│       ↓                                                    │
+│  Layer Tree (Compositing)                                  │
+│       ↓                                                    │
+│  Skia (Rendering)                                          │
+│       ↓                                                    │
+│  Platform GPU                                              │
+└────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## **25. "What would you change about Flutter's architecture?"**
+
+### **Critical Analysis of Flutter's Architecture**
+
+**1. Shader Compilation Jank Problem**
+```plaintext
+PROBLEM: First-time shader compilation causes frame drops
+ROOT CAUSE: Runtime GLSL compilation on target GPU
+CURRENT MITIGATION: ShaderWarmUp (imperfect)
+
+PROPOSED SOLUTION:
+┌─────────────────────────────────────────────┐
+│        SHADER PRE-COMPILATION SYSTEM        │
+├─────────────────────────────────────────────┤
+│ Build Time:                                 │
+│ • Analyze widget tree                       │
+│ • Extract shader signatures                 │
+│ • Pre-compile for target GPU arch           │
+│ • Bundle in asset bundle                    │
+│                                             │
+│ Runtime:                                    │
+│ • Load pre-compiled shaders                 │
+│ • Cache per GPU model                       │
+│ • Fallback to runtime compilation           │
+└─────────────────────────────────────────────┘
+```
+
+**Implementation Approach**:
+- **Static Analysis**: Dart analyzer extracts render patterns
+- **Shader Database**: Cloud service with GPU-specific shaders
+- **Hybrid Compilation**: Pre-compiled + runtime JIT compilation
+- **Progressive Loading**: Load shaders on-demand during idle frames
+
+**2. Platform Channel Serialization Overhead**
+```plaintext
+PROBLEM: JSON serialization bottleneck for large data
+ROOT CAUSE: Multiple encoding/decoding passes
+PERFORMANCE IMPACT: 10-100ms for complex data
+
+PROPOSED SOLUTION:
+┌─────────────────────────────────────────────┐
+│        ZERO-COPY SERIALIZATION              │
+├─────────────────────────────────────────────┤
+│ Shared Memory Buffer                        │
+│   Dart VM ──────┬───── Native Runtime       │
+│                 ↓                           │
+│           Memory Mapped File                │
+│                 ↓                           │
+│         Direct Struct Access                │
+│                                             │
+│ Features:                                   │
+│ • Type-safe struct definitions              │
+│ • Automatic alignment handling              │
+│ • Atomic operations for thread safety       │
+└─────────────────────────────────────────────┘
+```
+
+**Technical Implementation**:
+- **Shared Memory Arena**: Fixed-size buffer pool
+- **Cap'n Proto Schema**: Efficient binary serialization
+- **Generated Code**: Type-safe bindings for both sides
+- **Batching API**: Aggregate multiple calls into one IPC
+
+**3. Web Performance Gap vs Native**
+```plaintext
+PROBLEM: Web apps 2-3x slower than native
+ROOT CAUSES:
+• CanvasKit (WASM) overhead
+• DOM fallback limitations
+• JavaScript ↔ WASM bridge cost
+
+PROPOSED SOLUTION:
+┌─────────────────────────────────────────────┐
+│        HYBRID RENDERING ENGINE              │
+├─────────────────────────────────────────────┤
+│ Smart Renderer Selection                    │
+│   ↓                                         │
+│ CanvasKit: Complex animations, custom paint │
+│   ↓                                         │
+│ DOM: Static UI, text, simple layouts        │
+│   ↓                                         │
+│ CSS: Transforms, opacity, basic animations  │
+│                                             │
+│ Automatic Optimization:                     │
+│ • Profile-based renderer switching          │
+│ • Partial hydration of DOM elements         │
+│ • CSS animation offloading                  │
+└─────────────────────────────────────────────┘
+```
+
+**Optimization Strategies**:
+- **Selective Hydration**: Convert only interactive widgets to CanvasKit
+- **CSS Animation Layer**: Offload simple animations to CSS
+- **DOM Component Library**: Reusable, optimized DOM components
+- **WASM Worker Threads**: Move CanvasKit to Web Workers
+
+**4. Large App Startup Time**
+```plaintext
+PROBLEM: 2-5 second startup for complex apps
+ROOT CAUSES:
+• Dart VM initialization
+• Plugin registration
+• Asset loading
+• First frame rendering
+
+PROPOSED SOLUTION:
+┌─────────────────────────────────────────────┐
+│        PHASED STARTUP SYSTEM                │
+├─────────────────────────────────────────────┤
+│ Phase 1: Native Splash (0-100ms)            │
+│   • Display native splash screen            │
+│   • Initialize Dart VM in background        │
+│                                             │
+│ Phase 2: Minimal UI (100-500ms)             │
+│   • Load critical widgets only              │
+│   • Deferred plugin initialization          │
+│                                             │
+│ Phase 3: Full App (500ms+)                  │
+│   • Lazy-load remaining features            │
+│   • Background asset loading                │
+└─────────────────────────────────────────────┘
+```
+
+**Technical Improvements**:
+- **AOT Snapshot Splitting**: Separate critical path from features
+- **Plugin Lazy Loading**: Register plugins on-demand
+- **Asset Streaming**: Progressive asset loading during idle time
+- **Predictive Pre-fetching**: Anticipate user navigation paths
+
+**5. Plugin Ecosystem Fragmentation**
+```plaintext
+PROBLEM: Inconsistent plugin quality and maintenance
+ROOT CAUSES:
+• No standardized testing
+• Varying platform support
+• Documentation gaps
+• Versioning issues
+
+PROPOSED SOLUTION:
+┌─────────────────────────────────────────────┐
+│        PLUGIN CERTIFICATION PROGRAM         │
+├─────────────────────────────────────────────┐
+│ Tier 1: Verified Plugins                    │
+│   • Full platform support                   │
+│   • Comprehensive tests                     │
+│   • Performance benchmarks                  │
+│   • Security audits                         │
+│                                             │
+│ Tier 2: Community Plugins                   │
+│   • Basic functionality                     │
+│   • Limited platform support                │
+│   • Community maintenance                   │
+│                                             │
+│ Tooling:                                    │
+│ • Automated platform testing                │
+│ • Performance profiling suite               │
+│ • Security vulnerability scanner            │
+└─────────────────────────────────────────────┘
+```
+
+**Ecosystem Improvements**:
+- **Plugin Templates**: Standardized project structure
+- **Cross-Platform Testing**: Automated CI for all platforms
+- **Performance Baselines**: Minimum performance requirements
+- **Maintenance Requirements**: Regular update commitments
+
+---
+
+## **26. "Explain how Flutter achieves 120fps on ProMotion displays"**
+
+### **High-Frame-Rate Rendering Architecture**
+
+**1. VSync Synchronization with Display Refresh Rate**
+```plaintext
+┌────────────────────────────────────────────-─┐
+│        VSYNC SYNCHRONIZATION                 │
+├────────────────────────────────────────────-─┤
+│ Display: 120Hz → Frame every 8.33ms          │
+│ Flutter: Adaptive frame scheduling           │
+│                                              │
+│ Synchronization Layers:                      │
+│ 1. Platform VSync Signal                     │
+│    • CADisplayLink (iOS)                     │
+│    • Choreographer (Android)                 │
+│ 2. Engine Frame Callback                     │
+│ 3. Framework BeginFrame/EndFrame             │
+│                                              │
+│ Adaptive Frame Rate:                         │
+│ • Detect display capabilities                │
+│ • Match frame rate to content                │
+│ • Smooth transitions between rates           │
+└────────────────────────────────────────────-─┘
+```
+
+**Technical Implementation**:
+- **Hardware VSync Detection**: Query display capabilities via platform APIs
+- **Dynamic Frame Scheduling**: Switch between 60Hz, 90Hz, 120Hz based on content
+- **Frame Deadline Prediction**: Estimate GPU workload to meet next VSync
+- **Missed Frame Recovery**: Skip or interpolate frames when behind schedule
+
+**2. Frame Scheduling with Prediction**
+```plaintext
+┌────────────────────────────────────────────-─┐
+│        PREDICTIVE SCHEDULING                 │
+├───────────────────────────────────────────-──┤
+│ Timeline:                                    │
+│ t=0ms: VSync n                               │
+│ t=2ms: BeginFrame (Build/Layout)             │
+│ t=4ms: Compositing                           │
+│ t=6ms: GPU Work Submission                   │
+│ t=8.33ms: VSync n+1 (Display)                │
+│                                              │
+│ Prediction Algorithms:                       │
+│ • Historical frame time analysis             │
+│ • Workload estimation per widget type        │
+│ • Priority-based task scheduling             │
+│ • Frame time budgeting                       │
+└───────────────────────────────────────────-──┘
+```
+
+**Scheduling Strategy**:
+- **Workload Partitioning**: Split frame work across multiple CPU cores
+- **Priority Queues**: UI updates > animations > background tasks
+- **Frame Time Budgeting**: Reserve 2ms for unexpected work
+- **Predictive Optimization**: Skip non-essential work when running late
+
+**3. Pipeline Parallelism (Build/Layout/Paint/Composite)**
+```plaintext
+┌─────────────────────────────────────────────┐
+│        PIPELINED EXECUTION                  │
+├─────────────────────────────────────────────┤
+│ Frame n:           Frame n+1:               │
+│ ┌─────────────┐    ┌─────────────┐          │
+│ │   Build     │    │   Build     │          │
+│ └──────┬──────┘    └──────┬──────┘          │
+│        ↓                  ↓                 │
+│ ┌─────────────┐    ┌─────────────┐          │
+│ │   Layout    │←───┤   Layout    │          │
+│ └──────┬──────┘    └──────┬──────┘          │
+│        ↓                  ↓                 │
+│ ┌─────────────┐    ┌─────────────┐          │
+│ │   Paint     │←───┤   Paint     │          │
+│ └──────┬──────┘    └──────┬──────┘          │
+│        ↓                  ↓                 │
+│ ┌─────────────┐    ┌─────────────┐          │
+│ │  Composite  │←───┤  Composite  │          │
+│ └─────────────┘    └─────────────┘          │
+└─────────────────────────────────────────────┘
+```
+
+**Parallel Execution Model**:
+- **Stage Overlap**: Begin next frame's Build while current frame composites
+- **Dependency Tracking**: Automatic stage dependency resolution
+- **Worker Threads**: Dedicated threads for each pipeline stage
+- **Memory Barrier**: Safe data passing between stages
+
+**4. Jank Detection and Frame Skipping**
+```plaintext
+┌─────────────────────────────────────────────-┐
+│        JANK MANAGEMENT SYSTEM                │
+├────────────────────────────────────────────-─┤
+│ Monitoring:                                  │
+│ • Frame time histogram (1ms resolution)      │
+│ • GPU/CPU workload tracking                  │
+│ • Memory pressure signals                    │
+│                                              │
+│ Adaptive Strategies:                         │
+│ 1. Quality Reduction:                        │
+│    • Lower texture resolution                │
+│    • Simplify shaders                        │
+│    • Reduce animation fidelity               │
+│                                              │
+│ 2. Frame Skipping:                           │
+│    • Skip non-essential updates              │
+│    • Extend animation duration               │
+│    • Maintain responsiveness                 │
+└────────────────────────────────────────────-─┘
+```
+
+**Jank Prevention Techniques**:
+- **Proactive Quality Adjustment**: Detect slowdowns before they cause jank
+- **Intelligent Frame Skipping**: Skip visual-only updates, maintain interactivity
+- **Memory Pressure Response**: Aggressive cleanup under memory constraints
+- **Thermal Throttling Awareness**: Reduce workload when device overheats
+
+**5. CPU/GPU Workload Balancing**
+```plaintext
+┌─────────────────────────────────────────────┐
+│        WORKLOAD BALANCING                   │
+├─────────────────────────────────────────────┤
+│ CPU-Bound Tasks:                            │
+│ • Widget building                           │
+│ • Layout calculations                       │
+│ • Hit testing                               │
+│                                             │
+│ GPU-Bound Tasks:                            │
+│ • Shader execution                          │
+│ • Texture sampling                          │
+│ • Composition                               │
+│                                             │
+│ Balancing Strategy:                         │
+│ • Offload CPU→GPU where possible            │
+│ • Pre-compute expensive operations          │
+│ • Cache intermediate results                │
+│ • Parallelize across cores                  │
+└─────────────────────────────────────────────┘
+```
+
+**Optimization Techniques**:
+
+**CPU Optimization**:
+- **Widget Caching**: Memoize expensive widget builds
+- **Layout Cache**: Reuse layout calculations for identical constraints
+- **Incremental Build**: Only rebuild changed widget subtrees
+- **Worker Isolates**: Move heavy computations to background isolates
+
+**GPU Optimization**:
+- **Texture Atlas**: Combine small textures into larger ones
+- **Shader Caching**: Reuse compiled shader programs
+- **Command Buffer Reuse**: Replay previous frame's commands when unchanged
+- **Tile-Based Rendering**: Optimize for mobile GPU architectures (TBDR)
+
+**Memory Optimization**:
+- **Texture Pooling**: Reuse GPU texture memory
+- **Vertex Buffer Recycling**: Reuse geometry buffers
+- **Frame Buffer Management**: Smart allocation/deallocation
+- **Cache Warming**: Pre-load assets during idle frames
+
+**Complete 120fps Pipeline**:
+```plaintext
+┌─────────────────────────────────────────────────────────────┐
+│                    120FPS RENDERING PIPELINE                │
+├─────────────────────────────────────────────────────────────┤
+│ VSync (t=0ms)                                               │
+│   ↓                                                         │
+│ [CPU Core 1] Build Phase (0-2ms)                            │
+│   • Widget tree diffing                                     │
+│   • Element updates                                         │
+│                                                             │
+│ [CPU Core 2] Layout Phase (1-3ms)                           │
+│   • Constraint solving                                      │
+│   • Size/position calculations                              │
+│                                                             │
+│ [CPU Core 3] Paint Phase (2-4ms)                            │
+│   • Display list recording                                  │
+│   • Layer tree updates                                      │
+│                                                             │
+│ [GPU] Compositing Phase (3-6ms)                             │
+│   • Command buffer submission                               │
+│   • Shader execution                                        │
+│                                                             │
+│ Display (t=8.33ms) - Frame Complete!                        │
+│                                                             │
+│ Meanwhile: Next frame's Build starts at t=4ms               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Adaptive Frame Rate Strategy**:
+- **Content-Based Rate Selection**:
+  - 120Hz: Animations, scrolling, gestures
+  - 60Hz: Static content, reading
+  - 30Hz: Background apps, low-power mode
+  
+- **Smooth Transitions**: Gradual frame rate changes to avoid visual jumps
+- **Power Considerations**: Balance performance with battery life
+- **Thermal Management**: Reduce frame rate when device overheats
+
+**Monitoring and Analytics**:
+- **Real-time Metrics**: Frame time, GPU load, memory usage
+- **Jank Classification**: Identify root causes (CPU vs GPU bound)
+- **Performance Regression Detection**: Compare with historical baselines
+- **User Experience Scoring**: Quantify perceived smoothness
+
+This comprehensive approach enables Flutter to consistently deliver high-frame-rate experiences while maintaining efficiency and responsiveness across diverse hardware capabilities.
+
+
 ## **1. Difference between StatelessWidget and StatefulWidget**
 **StatelessWidget** is immutable - once created, its properties can't change. Used for static content that doesn't need to change over time.
 
